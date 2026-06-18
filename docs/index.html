@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Billetera Pro</title>
+  <meta name="theme-color" content="#2c3e50">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Billetera">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0; padding: 16px; background: #f4f4f9; color: #2c3e50;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .container { max-width: 480px; margin: auto; }
+    .panel { background: #fff; padding: 20px; border-radius: 14px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+
+    h2 { margin: 0 0 4px; }
+    .muted { color: #888; font-size: 13px; }
+
+    input, select, button, textarea {
+      width: 100%; padding: 12px; margin: 6px 0; border: 1px solid #d6d6e0;
+      border-radius: 8px; box-sizing: border-box; font-size: 16px; background: #fff;
+      font-family: inherit;
+    }
+    button { background: #2c3e50; color: #fff; cursor: pointer; font-weight: 600; border: none; }
+    button:active { opacity: .85; }
+    button.secondary { background: #ecf0f1; color: #2c3e50; }
+    button.danger { background: transparent; color: #e74c3c; width: auto; padding: 4px 8px; margin: 0; font-size: 18px; }
+
+    /* ---- Login ---- */
+    #auth .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+    #auth .tabs button { background: #ecf0f1; color: #2c3e50; }
+    #auth .tabs button.active { background: #2c3e50; color: #fff; }
+    .error { color: #e74c3c; font-size: 14px; margin: 6px 0; min-height: 18px; }
+    .ok { color: #27ae60; font-size: 14px; margin: 6px 0; min-height: 18px; }
+
+    /* ---- Topbar ---- */
+    .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .topbar .who { font-size: 13px; color: #555; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+    .topbar button { width: auto; padding: 8px 12px; margin: 0; font-size: 13px; background: #ecf0f1; color: #2c3e50; }
+
+    /* ---- Selector de mes ---- */
+    .mes-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .mes-nav button { width: 44px; height: 44px; padding: 0; font-size: 20px; border-radius: 50%; }
+    .mes-nav .mes-label { font-weight: 700; font-size: 17px; text-transform: capitalize; text-align: center; flex: 1; }
+
+    /* ---- Resumen ---- */
+    .resumen { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+    .card { padding: 16px; border-radius: 12px; text-align: center; color: #fff; }
+    .card .label { font-size: 13px; opacity: .9; }
+    .card .valor { display: block; font-size: 1.35em; margin-top: 4px; font-weight: 700; }
+    .card-ingresos { background: #2ecc71; }
+    .card-egresos { background: #e74c3c; }
+    .card-balance { grid-column: span 2; background: #3498db; }
+
+    .box-cat { background: #f7f7fb; padding: 14px; border-radius: 10px; margin-top: 16px; font-size: 14px; }
+    .box-cat .fila { display: flex; justify-content: space-between; padding: 4px 0; }
+
+    table { width: 100%; margin-top: 8px; border-collapse: collapse; }
+    th, td { padding: 10px 6px; border-bottom: 1px solid #eee; text-align: left; font-size: 14px; }
+    th { color: #888; font-weight: 600; font-size: 12px; text-transform: uppercase; }
+    td.monto-ing { color: #27ae60; font-weight: 600; }
+    td.monto-egr { color: #e74c3c; font-weight: 600; }
+    .vacio { text-align: center; color: #aaa; padding: 24px 0; }
+
+    .section-title { margin: 22px 0 6px; font-size: 15px; }
+    .hidden { display: none !important; }
+
+    .config-warn { background: #fff3cd; border: 1px solid #ffe69c; color: #664d03; padding: 14px; border-radius: 10px; font-size: 14px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- ================= AVISO DE CONFIGURACIÓN ================= -->
+  <div id="config-warn" class="panel hidden">
+    <h2>Falta configurar</h2>
+    <div class="config-warn">
+      Antes de usar la app hay que pegar las claves de Supabase en el archivo
+      <b>index.html</b> (constantes <b>SUPABASE_URL</b> y <b>SUPABASE_ANON_KEY</b>).
+      Mira la guía <b>GUIA-INSTALACION.md</b>.
+    </div>
+  </div>
+
+  <!-- ================= LOGIN / REGISTRO ================= -->
+  <div id="auth" class="panel hidden">
+    <h2>Mi Billetera</h2>
+    <p class="muted">Inicia sesión o crea tu cuenta</p>
+    <div class="tabs">
+      <button id="tab-login" class="active" onclick="cambiarTab('login')">Iniciar sesión</button>
+      <button id="tab-signup" onclick="cambiarTab('signup')">Crear cuenta</button>
+    </div>
+    <input type="email" id="auth-email" placeholder="Correo electrónico" autocomplete="email">
+    <input type="password" id="auth-pass" placeholder="Contraseña (mín. 6 caracteres)" autocomplete="current-password">
+    <div id="auth-error" class="error"></div>
+    <div id="auth-ok" class="ok"></div>
+    <button id="auth-submit" onclick="enviarAuth()">Entrar</button>
+  </div>
+
+  <!-- ================= APP ================= -->
+  <div id="app" class="hidden">
+    <div class="panel">
+      <div class="topbar">
+        <span class="who" id="who"></span>
+        <button onclick="cerrarSesion()">Cerrar sesión</button>
+      </div>
+
+      <div class="mes-nav">
+        <button onclick="cambiarMes(-1)" aria-label="Mes anterior">‹</button>
+        <div class="mes-label" id="mes-label">—</div>
+        <button onclick="cambiarMes(1)" aria-label="Mes siguiente">›</button>
+      </div>
+
+      <div class="resumen">
+        <div class="card card-ingresos"><span class="label">Ingresos</span><span id="res-ingresos" class="valor">$0</span></div>
+        <div class="card card-egresos"><span class="label">Egresos</span><span id="res-egresos" class="valor">$0</span></div>
+        <div class="card card-balance"><span class="label">Balance</span><span id="res-balance" class="valor">$0</span></div>
+      </div>
+
+      <h3 class="section-title">Registrar movimiento</h3>
+      <select id="tipo">
+        <option value="Egreso">Egreso (gasto)</option>
+        <option value="Ingreso">Ingreso</option>
+      </select>
+      <input type="text" id="desc" placeholder="Descripción">
+      <input type="number" id="monto" placeholder="Monto" inputmode="decimal" step="0.01">
+      <select id="cat">
+        <option value="Sueldos">Sueldos</option>
+        <option value="Combustible">Combustible</option>
+        <option value="Comida">Comida</option>
+        <option value="Vivienda">Vivienda</option>
+        <option value="Otros">Otros</option>
+      </select>
+      <input type="date" id="fecha">
+      <button id="btn-registrar" onclick="registrar()">Registrar</button>
+
+      <div id="resumen-cat" class="box-cat"></div>
+
+      <h3 class="section-title">Historial del mes</h3>
+      <table>
+        <thead><tr><th>Fecha</th><th>Descripción</th><th>Monto</th><th></th></tr></thead>
+        <tbody id="historial"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* =========================================================================
+   CONFIGURACIÓN — pega aquí los datos de tu proyecto Supabase.
+   (Supabase → Settings → API → "Project URL" y "anon public" key)
+   ========================================================================= */
+const SUPABASE_URL = "PEGA_AQUI_TU_PROJECT_URL";
+const SUPABASE_ANON_KEY = "PEGA_AQUI_TU_ANON_KEY";
+/* ========================================================================= */
+
+let sb = null;
+let movimientos = [];          // todos los movimientos del usuario
+let mesActual = new Date();    // mes que se está viendo
+mesActual.setDate(1);
+
+const fmt = n => "$" + (Number(n) || 0).toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+const el = id => document.getElementById(id);
+
+// -------------------- Arranque --------------------
+window.addEventListener("load", async () => {
+  if (!SUPABASE_URL || SUPABASE_URL.startsWith("PEGA_AQUI") ||
+      !SUPABASE_ANON_KEY || SUPABASE_ANON_KEY.startsWith("PEGA_AQUI")) {
+    el("config-warn").classList.remove("hidden");
+    return;
+  }
+  sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  el("fecha").value = hoyISO();
+
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) mostrarApp(session.user);
+  else mostrarAuth();
+
+  sb.auth.onAuthStateChange((_event, session) => {
+    if (session) mostrarApp(session.user);
+    else mostrarAuth();
+  });
+
+  // Service worker (para instalar en el celular)
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
+});
+
+function hoyISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+
+// -------------------- Pantallas --------------------
+function mostrarAuth() {
+  el("auth").classList.remove("hidden");
+  el("app").classList.add("hidden");
+}
+async function mostrarApp(user) {
+  el("auth").classList.add("hidden");
+  el("app").classList.remove("hidden");
+  el("who").textContent = user.email;
+  await cargarMovimientos();
+}
+
+// -------------------- Login / Registro --------------------
+let modoAuth = "login";
+function cambiarTab(modo) {
+  modoAuth = modo;
+  el("tab-login").classList.toggle("active", modo === "login");
+  el("tab-signup").classList.toggle("active", modo === "signup");
+  el("auth-submit").textContent = modo === "login" ? "Entrar" : "Crear cuenta";
+  el("auth-error").textContent = "";
+  el("auth-ok").textContent = "";
+}
+
+async function enviarAuth() {
+  const email = el("auth-email").value.trim();
+  const pass = el("auth-pass").value;
+  el("auth-error").textContent = "";
+  el("auth-ok").textContent = "";
+  if (!email || !pass) { el("auth-error").textContent = "Completa correo y contraseña."; return; }
+
+  const btn = el("auth-submit");
+  btn.disabled = true; btn.textContent = "Procesando...";
+  try {
+    if (modoAuth === "login") {
+      const { error } = await sb.auth.signInWithPassword({ email, password: pass });
+      if (error) throw error;
+    } else {
+      const { data, error } = await sb.auth.signUp({ email, password: pass });
+      if (error) throw error;
+      if (data.session) {
+        // sesión inmediata (confirmación de email desactivada)
+      } else {
+        el("auth-ok").textContent = "Cuenta creada. Revisa tu correo para confirmar y luego inicia sesión.";
+        cambiarTab("login");
+      }
+    }
+  } catch (e) {
+    el("auth-error").textContent = traducirError(e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = modoAuth === "login" ? "Entrar" : "Crear cuenta";
+  }
+}
+
+function traducirError(msg) {
+  if (!msg) return "Ocurrió un error.";
+  if (/Invalid login credentials/i.test(msg)) return "Correo o contraseña incorrectos.";
+  if (/already registered/i.test(msg)) return "Ese correo ya está registrado.";
+  if (/at least 6/i.test(msg)) return "La contraseña debe tener al menos 6 caracteres.";
+  if (/valid email/i.test(msg)) return "El correo no es válido.";
+  return msg;
+}
+
+async function cerrarSesion() {
+  await sb.auth.signOut();
+  movimientos = [];
+}
+
+// -------------------- Datos --------------------
+async function cargarMovimientos() {
+  const { data, error } = await sb
+    .from("movimientos")
+    .select("*")
+    .order("fecha", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) { alert("Error al cargar: " + error.message); return; }
+  movimientos = data || [];
+  render();
+}
+
+async function registrar() {
+  const tipo = el("tipo").value;
+  const desc = el("desc").value.trim();
+  const monto = parseFloat(el("monto").value);
+  const cat = el("cat").value;
+  const fecha = el("fecha").value;
+
+  if (!fecha) { alert("Elige una fecha."); return; }
+  if (isNaN(monto) || monto <= 0) { alert("Ingresa un monto válido."); return; }
+
+  const btn = el("btn-registrar");
+  btn.disabled = true; btn.textContent = "Guardando...";
+  const { error } = await sb.from("movimientos").insert({
+    tipo, descripcion: desc, monto, categoria: cat, fecha
+  });
+  btn.disabled = false; btn.textContent = "Registrar";
+
+  if (error) { alert("No se pudo guardar: " + error.message); return; }
+
+  el("desc").value = "";
+  el("monto").value = "";
+  // Saltar al mes del movimiento recién cargado para que se vea
+  mesActual = new Date(fecha + "T00:00:00");
+  mesActual.setDate(1);
+  await cargarMovimientos();
+}
+
+async function eliminar(id) {
+  if (!confirm("¿Eliminar este movimiento?")) return;
+  const { error } = await sb.from("movimientos").delete().eq("id", id);
+  if (error) { alert("No se pudo eliminar: " + error.message); return; }
+  await cargarMovimientos();
+}
+
+// -------------------- Mes --------------------
+function cambiarMes(delta) {
+  mesActual.setMonth(mesActual.getMonth() + delta);
+  render();
+}
+function mismoMes(fechaStr) {
+  const f = new Date(fechaStr + "T00:00:00");
+  return f.getFullYear() === mesActual.getFullYear() && f.getMonth() === mesActual.getMonth();
+}
+
+// -------------------- Render --------------------
+function render() {
+  el("mes-label").textContent = mesActual.toLocaleDateString("es-AR", { month: "long", year: "numeric" });
+
+  const delMes = movimientos.filter(m => mismoMes(m.fecha));
+
+  let ingresos = 0, egresos = 0;
+  const catTotals = {};
+  delMes.forEach(m => {
+    const monto = parseFloat(m.monto) || 0;
+    if (m.tipo === "Ingreso") {
+      ingresos += monto;
+    } else {
+      egresos += monto;
+      catTotals[m.categoria || "Otros"] = (catTotals[m.categoria || "Otros"] || 0) + monto;
+    }
+  });
+
+  el("res-ingresos").textContent = fmt(ingresos);
+  el("res-egresos").textContent = fmt(egresos);
+  el("res-balance").textContent = fmt(ingresos - egresos);
+
+  // Categorías
+  const cajaCat = el("resumen-cat");
+  const cats = Object.keys(catTotals).sort((a,b) => catTotals[b] - catTotals[a]);
+  if (cats.length === 0) {
+    cajaCat.innerHTML = "<span class='muted'>Sin gastos este mes.</span>";
+  } else {
+    cajaCat.innerHTML = "<b>Gastos por categoría</b>" +
+      cats.map(c => `<div class="fila"><span>${escapeHtml(c)}</span><span>${fmt(catTotals[c])}</span></div>`).join("");
+  }
+
+  // Historial
+  const tbody = el("historial");
+  if (delMes.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" class="vacio">No hay movimientos este mes.</td></tr>`;
+  } else {
+    tbody.innerHTML = delMes.map(m => {
+      const monto = parseFloat(m.monto) || 0;
+      const clase = m.tipo === "Ingreso" ? "monto-ing" : "monto-egr";
+      const signo = m.tipo === "Ingreso" ? "+" : "−";
+      return `<tr>
+        <td>${formatoFechaCorta(m.fecha)}</td>
+        <td>${escapeHtml(m.descripcion || m.categoria || "")}</td>
+        <td class="${clase}">${signo}${fmt(monto)}</td>
+        <td><button class="danger" onclick="eliminar('${m.id}')" aria-label="Eliminar">🗑</button></td>
+      </tr>`;
+    }).join("");
+  }
+}
+
+function formatoFechaCorta(fechaStr) {
+  const f = new Date(fechaStr + "T00:00:00");
+  return `${String(f.getDate()).padStart(2,"0")}/${String(f.getMonth()+1).padStart(2,"0")}`;
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+}
+</script>
+</body>
+</html>
