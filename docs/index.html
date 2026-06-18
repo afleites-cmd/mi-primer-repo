@@ -102,6 +102,19 @@
     <div id="auth-error" class="error"></div>
     <div id="auth-ok" class="ok"></div>
     <button id="auth-submit" onclick="enviarAuth()">Entrar</button>
+    <p style="text-align:center;margin-top:12px;">
+      <a href="#" onclick="recuperarPassword();return false;" style="color:#3498db;font-size:14px;text-decoration:none;">¿Olvidaste tu contraseña?</a>
+    </p>
+  </div>
+
+  <!-- ================= RECUPERAR CONTRASEÑA ================= -->
+  <div id="recovery" class="panel hidden">
+    <h2>Nueva contraseña</h2>
+    <p class="muted">Escribe tu nueva contraseña y guárdala.</p>
+    <input type="password" id="rec-pass" placeholder="Nueva contraseña (mín. 6 caracteres)" autocomplete="new-password">
+    <div id="rec-error" class="error"></div>
+    <div id="rec-ok" class="ok"></div>
+    <button onclick="guardarNuevaPassword()">Guardar contraseña</button>
   </div>
 
   <!-- ================= APP ================= -->
@@ -182,11 +195,14 @@ window.addEventListener("load", async () => {
 
   el("fecha").value = hoyISO();
 
+  const esRecuperacion = window.location.hash.includes("type=recovery");
   const { data: { session } } = await sb.auth.getSession();
-  if (session) mostrarApp(session.user);
+  if (esRecuperacion) mostrarRecovery();
+  else if (session) mostrarApp(session.user);
   else mostrarAuth();
 
-  sb.auth.onAuthStateChange((_event, session) => {
+  sb.auth.onAuthStateChange((event, session) => {
+    if (event === "PASSWORD_RECOVERY") { mostrarRecovery(); return; }
     if (session) mostrarApp(session.user);
     else mostrarAuth();
   });
@@ -206,9 +222,16 @@ function hoyISO() {
 function mostrarAuth() {
   el("auth").classList.remove("hidden");
   el("app").classList.add("hidden");
+  el("recovery").classList.add("hidden");
+}
+function mostrarRecovery() {
+  el("auth").classList.add("hidden");
+  el("app").classList.add("hidden");
+  el("recovery").classList.remove("hidden");
 }
 async function mostrarApp(user) {
   el("auth").classList.add("hidden");
+  el("recovery").classList.add("hidden");
   el("app").classList.remove("hidden");
   el("who").textContent = user.email;
   await cargarMovimientos();
@@ -268,6 +291,30 @@ function traducirError(msg) {
 async function cerrarSesion() {
   await sb.auth.signOut();
   movimientos = [];
+}
+
+// -------------------- Recuperar contraseña --------------------
+async function recuperarPassword() {
+  const email = el("auth-email").value.trim();
+  el("auth-error").textContent = "";
+  el("auth-ok").textContent = "";
+  if (!email) { el("auth-error").textContent = "Escribe tu correo arriba y vuelve a tocar este enlace."; return; }
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.href.split("#")[0] });
+  if (error) { el("auth-error").textContent = traducirError(error.message); return; }
+  el("auth-ok").textContent = "Te enviamos un correo para restablecer la contraseña. Revisa tu bandeja (y la carpeta de spam).";
+}
+
+async function guardarNuevaPassword() {
+  const pass = el("rec-pass").value;
+  el("rec-error").textContent = "";
+  el("rec-ok").textContent = "";
+  if (!pass || pass.length < 6) { el("rec-error").textContent = "La contraseña debe tener al menos 6 caracteres."; return; }
+  const { error } = await sb.auth.updateUser({ password: pass });
+  if (error) { el("rec-error").textContent = traducirError(error.message); return; }
+  el("rec-ok").textContent = "¡Contraseña actualizada! Entrando...";
+  history.replaceState(null, "", window.location.pathname);
+  const { data: { user } } = await sb.auth.getUser();
+  mostrarApp(user);
 }
 
 // -------------------- Datos --------------------
