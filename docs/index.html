@@ -87,6 +87,14 @@
     .leg-dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
     .leg-nom { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .leg-val { color: #555; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+    /* ---- Botón editar en el historial ---- */
+    button.edit { background: transparent; color: #3498db; width: auto; padding: 4px 6px; margin: 0; font-size: 17px; }
+    td .acciones { display: flex; gap: 2px; justify-content: flex-end; }
+
+    /* ---- Comparación de meses ---- */
+    .comp-leg { display: flex; gap: 18px; justify-content: center; font-size: 13px; color: #555; margin-bottom: 8px; }
+    .comp-leg .leg-dot { display: inline-block; margin-right: 5px; vertical-align: middle; }
   </style>
 </head>
 <body>
@@ -158,7 +166,12 @@
         <div id="grafico"></div>
       </div>
 
-      <h3 class="section-title">Registrar movimiento</h3>
+      <div class="grafico-box">
+        <button class="secondary" id="btn-comparar" onclick="toggleComparar()" style="margin:0;">📊 Comparar meses</button>
+        <div id="comparar" class="hidden" style="margin-top:12px;"></div>
+      </div>
+
+      <h3 class="section-title" id="form-title">Registrar movimiento</h3>
       <select id="tipo">
         <option value="Egreso">Egreso (gasto)</option>
         <option value="Ingreso">Ingreso</option>
@@ -175,6 +188,7 @@
       <input type="text" id="cat-nueva" class="hidden" placeholder="Nombre de la nueva categoría" maxlength="30">
       <input type="date" id="fecha">
       <button id="btn-registrar" onclick="registrar()">Registrar</button>
+      <button id="btn-cancelar" class="secondary hidden" onclick="cancelarEdicion()">Cancelar edición</button>
 
       <div id="resumen-cat" class="box-cat"></div>
 
@@ -185,6 +199,7 @@
       </table>
 
       <button class="secondary" onclick="exportarExcel(this)" style="margin-top:14px;">⬇️ Exportar mes a Excel</button>
+      <button class="secondary" onclick="exportarAnio(this)" style="margin-top:8px;">📅 Exportar año entero a Excel</button>
     </div>
   </div>
 
@@ -205,6 +220,8 @@ let movimientos = [];          // todos los movimientos del usuario
 let mesActual = new Date();    // mes que se está viendo
 mesActual.setDate(1);
 let tipoGrafico = "Egreso";    // qué muestra el gráfico: "Egreso" o "Ingreso"
+let editandoId = null;         // id del movimiento que se está editando (null = registrando uno nuevo)
+let comparVisible = false;     // si la comparación de meses está abierta
 
 // Categorías que aparecen siempre; a estas se suman las que el usuario vaya creando.
 const CATS_DEFAULT = ["Sueldos", "Combustible", "Comida", "Vivienda"];
@@ -375,22 +392,71 @@ async function registrar() {
   if (!fecha) { alert("Elige una fecha."); return; }
   if (isNaN(monto) || monto <= 0) { alert("Ingresa un monto válido."); return; }
 
+  const editando = editandoId !== null;
   const btn = el("btn-registrar");
   btn.disabled = true; btn.textContent = "Guardando...";
-  const { error } = await sb.from("movimientos").insert({
-    tipo, descripcion: desc, monto, categoria: cat, fecha
-  });
-  btn.disabled = false; btn.textContent = "Registrar";
 
-  if (error) { alert("No se pudo guardar: " + error.message); return; }
+  const datos = { tipo, descripcion: desc, monto, categoria: cat, fecha };
+  let error;
+  if (editando) {
+    ({ error } = await sb.from("movimientos").update(datos).eq("id", editandoId));
+  } else {
+    ({ error } = await sb.from("movimientos").insert(datos));
+  }
+  btn.disabled = false;
 
+  if (error) {
+    btn.textContent = editando ? "Guardar cambios" : "Registrar";
+    alert("No se pudo guardar: " + error.message);
+    return;
+  }
+
+  finalizarEdicion();
   el("desc").value = "";
   el("monto").value = "";
   el("cat-nueva").value = "";
-  // Saltar al mes del movimiento recién cargado para que se vea
+  // Saltar al mes del movimiento recién cargado/editado para que se vea
   mesActual = new Date(fecha + "T00:00:00");
   mesActual.setDate(1);
   await cargarMovimientos();
+}
+
+// -------------------- Editar movimiento --------------------
+function editar(id) {
+  const m = movimientos.find(x => String(x.id) === String(id));
+  if (!m) return;
+  editandoId = m.id;
+
+  el("tipo").value = m.tipo;
+  el("desc").value = m.descripcion || "";
+  el("monto").value = m.monto;
+  poblarCategorias(); // asegura que la categoría del movimiento exista como opción
+  const tieneOpcion = [...el("cat").options].some(o => o.value === m.categoria);
+  el("cat").value = tieneOpcion ? m.categoria : "Otros";
+  el("cat-nueva").value = tieneOpcion ? "" : (m.categoria || "");
+  toggleNuevaCat();
+  el("fecha").value = m.fecha;
+
+  el("form-title").textContent = "Editar movimiento";
+  el("btn-registrar").textContent = "Guardar cambios";
+  el("btn-cancelar").classList.remove("hidden");
+  el("form-title").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function cancelarEdicion() {
+  finalizarEdicion();
+  el("desc").value = "";
+  el("monto").value = "";
+  el("cat-nueva").value = "";
+  toggleNuevaCat();
+}
+
+// Vuelve el formulario al modo "registrar nuevo".
+function finalizarEdicion() {
+  editandoId = null;
+  el("form-title").textContent = "Registrar movimiento";
+  el("btn-registrar").textContent = "Registrar";
+  el("btn-cancelar").classList.add("hidden");
 }
 
 async function eliminar(id) {
@@ -439,6 +505,9 @@ function render() {
   // Gráfico (egresos o ingresos según el botón elegido)
   el("grafico").innerHTML = dibujarDonut(tipoGrafico === "Ingreso" ? ingTotals : egrTotals);
 
+  // Comparación de meses (si está abierta)
+  if (comparVisible) el("comparar").innerHTML = dibujarComparacion();
+
   // Categorías
   const cajaCat = el("resumen-cat");
   const cats = Object.keys(egrTotals).sort((a,b) => egrTotals[b] - egrTotals[a]);
@@ -462,7 +531,10 @@ function render() {
         <td>${formatoFechaCorta(m.fecha)}</td>
         <td>${escapeHtml(m.descripcion || m.categoria || "")}</td>
         <td class="${clase}">${signo}${fmt(monto)}</td>
-        <td><button class="danger" onclick="eliminar('${m.id}')" aria-label="Eliminar">🗑</button></td>
+        <td><div class="acciones">
+          <button class="edit" onclick="editar('${m.id}')" aria-label="Editar">✏️</button>
+          <button class="danger" onclick="eliminar('${m.id}')" aria-label="Eliminar">🗑</button>
+        </div></td>
       </tr>`;
     }).join("");
   }
@@ -538,6 +610,68 @@ function dibujarDonut(totals) {
   return `<div class="donut-wrap">${svg}<div class="leyenda">${destacado}${leyenda}</div></div>`;
 }
 
+// -------------------- Comparar meses --------------------
+function toggleComparar() {
+  comparVisible = !comparVisible;
+  el("comparar").classList.toggle("hidden", !comparVisible);
+  el("btn-comparar").textContent = comparVisible ? "📊 Ocultar comparación" : "📊 Comparar meses";
+  if (comparVisible) el("comparar").innerHTML = dibujarComparacion();
+}
+
+// Devuelve los últimos n meses (incluido el que se está viendo), del más viejo al más nuevo.
+function mesesRecientes(n) {
+  const base = new Date(mesActual); base.setDate(1);
+  const arr = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(base); d.setMonth(d.getMonth() - i);
+    arr.push(d);
+  }
+  return arr;
+}
+
+function mesAbbr(d) {
+  const m = d.toLocaleDateString("es-AR", { month: "short" }).replace(".", "");
+  return m + " " + String(d.getFullYear()).slice(2);
+}
+
+// Dibuja un gráfico de barras (ingresos vs egresos) de los últimos 6 meses.
+function dibujarComparacion() {
+  const datos = mesesRecientes(6).map(d => {
+    let ing = 0, egr = 0;
+    movimientos.forEach(m => {
+      const f = new Date(m.fecha + "T00:00:00");
+      if (f.getFullYear() === d.getFullYear() && f.getMonth() === d.getMonth()) {
+        const v = parseFloat(m.monto) || 0;
+        if (m.tipo === "Ingreso") ing += v; else egr += v;
+      }
+    });
+    return { d, ing, egr };
+  });
+
+  const max = Math.max(1, ...datos.flatMap(x => [x.ing, x.egr]));
+  const W = 340, base = 150, top = 18, bh = base - top, groupW = W / 6, barW = 14, gap = 4;
+
+  let barras = "";
+  datos.forEach((x, i) => {
+    const cx = i * groupW + groupW / 2;
+    const hi = (x.ing / max) * bh, he = (x.egr / max) * bh;
+    barras += `<rect x="${(cx - barW - gap / 2).toFixed(1)}" y="${(base - hi).toFixed(1)}" width="${barW}" height="${hi.toFixed(1)}" rx="2" fill="#2ecc71"><title>${mesAbbr(x.d)} · Ingresos ${fmt(x.ing)}</title></rect>`;
+    barras += `<rect x="${(cx + gap / 2).toFixed(1)}" y="${(base - he).toFixed(1)}" width="${barW}" height="${he.toFixed(1)}" rx="2" fill="#e74c3c"><title>${mesAbbr(x.d)} · Egresos ${fmt(x.egr)}</title></rect>`;
+    barras += `<text x="${cx.toFixed(1)}" y="${base + 16}" text-anchor="middle" font-size="11" fill="#888">${mesAbbr(x.d)}</text>`;
+  });
+
+  const svg = `<svg viewBox="0 0 ${W} ${base + 24}" width="100%" role="img" aria-label="Comparación de los últimos 6 meses">
+    ${barras}
+    <line x1="0" y1="${base}" x2="${W}" y2="${base}" stroke="#ddd"></line>
+  </svg>`;
+
+  const leyenda = `<div class="comp-leg">
+    <span><span class="leg-dot" style="background:#2ecc71"></span>Ingresos</span>
+    <span><span class="leg-dot" style="background:#e74c3c"></span>Egresos</span>
+  </div>`;
+  return leyenda + svg;
+}
+
 // -------------------- Exportar a Excel --------------------
 // Carga la librería de Excel (SheetJS) solo cuando hace falta.
 function cargarSheetJS() {
@@ -562,30 +696,7 @@ async function exportarExcel(btn) {
 
   try {
     const XLSX = await cargarSheetJS();
-
-    let ingresos = 0, egresos = 0;
-    const filas = delMes.map(m => {
-      const monto = parseFloat(m.monto) || 0;
-      if (m.tipo === "Ingreso") ingresos += monto; else egresos += monto;
-      return {
-        Fecha: m.fecha,
-        Tipo: m.tipo,
-        Descripción: m.descripcion || "",
-        Categoría: m.categoria || "Otros",
-        Monto: monto
-      };
-    });
-
-    const aoa = [
-      ["Fecha", "Tipo", "Descripción", "Categoría", "Monto"],
-      ...filas.map(f => [f.Fecha, f.Tipo, f.Descripción, f.Categoría, f.Monto]),
-      [],
-      ["", "", "", "Ingresos", ingresos],
-      ["", "", "", "Egresos", egresos],
-      ["", "", "", "Balance", ingresos - egresos]
-    ];
-
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const ws = XLSX.utils.aoa_to_sheet(aoaMovimientos(delMes));
     ws["!cols"] = [{ wch: 12 }, { wch: 10 }, { wch: 30 }, { wch: 16 }, { wch: 12 }];
 
     const wb = XLSX.utils.book_new();
@@ -596,6 +707,69 @@ async function exportarExcel(btn) {
     alert(e.message || "No se pudo exportar.");
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = "⬇️ Exportar mes a Excel"; }
+  }
+}
+
+// Construye las filas (con encabezado y totales) de una lista de movimientos.
+function aoaMovimientos(lista) {
+  let ing = 0, egr = 0;
+  const filas = lista.map(m => {
+    const monto = parseFloat(m.monto) || 0;
+    if (m.tipo === "Ingreso") ing += monto; else egr += monto;
+    return [m.fecha, m.tipo, m.descripcion || "", m.categoria || "Otros", monto];
+  });
+  return [
+    ["Fecha", "Tipo", "Descripción", "Categoría", "Monto"],
+    ...filas,
+    [],
+    ["", "", "", "Ingresos", ing],
+    ["", "", "", "Egresos", egr],
+    ["", "", "", "Balance", ing - egr]
+  ];
+}
+
+// Exporta TODO el año que se está viendo: una hoja resumen por mes + una hoja con todos los movimientos.
+async function exportarAnio(btn) {
+  const anio = mesActual.getFullYear();
+  const delAnio = movimientos
+    .filter(m => new Date(m.fecha + "T00:00:00").getFullYear() === anio)
+    .slice()
+    .sort((a, b) => a.fecha.localeCompare(b.fecha));
+  if (delAnio.length === 0) { alert("No hay movimientos en " + anio + " para exportar."); return; }
+
+  if (btn) { btn.disabled = true; btn.textContent = "Preparando…"; }
+
+  try {
+    const XLSX = await cargarSheetJS();
+
+    // Hoja "Resumen": una fila por mes con movimientos.
+    const resumen = [["Mes", "Ingresos", "Egresos", "Balance"]];
+    let totIng = 0, totEgr = 0;
+    for (let mIdx = 0; mIdx < 12; mIdx++) {
+      const delMes = delAnio.filter(m => new Date(m.fecha + "T00:00:00").getMonth() === mIdx);
+      if (delMes.length === 0) continue;
+      let ing = 0, egr = 0;
+      delMes.forEach(m => { const v = parseFloat(m.monto) || 0; if (m.tipo === "Ingreso") ing += v; else egr += v; });
+      totIng += ing; totEgr += egr;
+      const nombre = new Date(anio, mIdx, 1).toLocaleDateString("es-AR", { month: "long" });
+      resumen.push([nombre, ing, egr, ing - egr]);
+    }
+    resumen.push([], ["TOTAL", totIng, totEgr, totIng - totEgr]);
+
+    const wb = XLSX.utils.book_new();
+    const wsR = XLSX.utils.aoa_to_sheet(resumen);
+    wsR["!cols"] = [{ wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, wsR, "Resumen " + anio);
+
+    const wsM = XLSX.utils.aoa_to_sheet(aoaMovimientos(delAnio));
+    wsM["!cols"] = [{ wch: 12 }, { wch: 10 }, { wch: 30 }, { wch: 16 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, wsM, "Movimientos");
+
+    XLSX.writeFile(wb, `Billetera año ${anio}.xlsx`);
+  } catch (e) {
+    alert(e.message || "No se pudo exportar.");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "📅 Exportar año entero a Excel"; }
   }
 }
 
