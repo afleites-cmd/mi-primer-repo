@@ -74,6 +74,19 @@
     .hidden { display: none !important; }
 
     .config-warn { background: #fff3cd; border: 1px solid #ffe69c; color: #664d03; padding: 14px; border-radius: 10px; font-size: 14px; line-height: 1.5; }
+
+    /* ---- Gráfico ---- */
+    .grafico-box { background: #f7f7fb; padding: 14px; border-radius: 10px; margin-top: 16px; }
+    .grafico-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+    .grafico-tabs button { background: #ecf0f1; color: #2c3e50; font-size: 13px; padding: 8px; margin: 0; }
+    .grafico-tabs button.active { background: #2c3e50; color: #fff; }
+    .donut-wrap { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center; }
+    .leyenda { flex: 1; min-width: 170px; font-size: 13px; }
+    .leg-top { font-size: 13px; color: #555; margin-bottom: 8px; }
+    .leg-fila { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+    .leg-dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+    .leg-nom { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .leg-val { color: #555; font-variant-numeric: tabular-nums; white-space: nowrap; }
   </style>
 </head>
 <body>
@@ -137,6 +150,14 @@
         <div class="card card-balance"><span class="label">Balance</span><span id="res-balance" class="valor">$0</span></div>
       </div>
 
+      <div class="grafico-box">
+        <div class="grafico-tabs">
+          <button id="gt-egreso" class="active" onclick="cambiarGrafico('Egreso')">Egresos</button>
+          <button id="gt-ingreso" onclick="cambiarGrafico('Ingreso')">Ingresos</button>
+        </div>
+        <div id="grafico"></div>
+      </div>
+
       <h3 class="section-title">Registrar movimiento</h3>
       <select id="tipo">
         <option value="Egreso">Egreso (gasto)</option>
@@ -144,13 +165,14 @@
       </select>
       <input type="text" id="desc" placeholder="Descripción">
       <input type="number" id="monto" placeholder="Monto" inputmode="decimal" step="0.01">
-      <select id="cat">
+      <select id="cat" onchange="toggleNuevaCat()">
         <option value="Sueldos">Sueldos</option>
         <option value="Combustible">Combustible</option>
         <option value="Comida">Comida</option>
         <option value="Vivienda">Vivienda</option>
-        <option value="Otros">Otros</option>
+        <option value="Otros">Otros (agregar nueva…)</option>
       </select>
+      <input type="text" id="cat-nueva" class="hidden" placeholder="Nombre de la nueva categoría" maxlength="30">
       <input type="date" id="fecha">
       <button id="btn-registrar" onclick="registrar()">Registrar</button>
 
@@ -161,6 +183,8 @@
         <thead><tr><th>Fecha</th><th>Descripción</th><th>Monto</th><th></th></tr></thead>
         <tbody id="historial"></tbody>
       </table>
+
+      <button class="secondary" onclick="exportarExcel(this)" style="margin-top:14px;">⬇️ Exportar mes a Excel</button>
     </div>
   </div>
 
@@ -180,6 +204,12 @@ let sb = null;
 let movimientos = [];          // todos los movimientos del usuario
 let mesActual = new Date();    // mes que se está viendo
 mesActual.setDate(1);
+let tipoGrafico = "Egreso";    // qué muestra el gráfico: "Egreso" o "Ingreso"
+
+// Categorías que aparecen siempre; a estas se suman las que el usuario vaya creando.
+const CATS_DEFAULT = ["Sueldos", "Combustible", "Comida", "Vivienda"];
+// Paleta de colores para el gráfico (se repite si hay muchas categorías).
+const PALETA = ["#e74c3c","#3498db","#2ecc71","#f39c12","#9b59b6","#1abc9c","#e67e22","#34495e","#fd79a8","#16a085"];
 
 const fmt = n => "$" + (Number(n) || 0).toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 const el = id => document.getElementById(id);
@@ -333,8 +363,14 @@ async function registrar() {
   const tipo = el("tipo").value;
   const desc = el("desc").value.trim();
   const monto = parseFloat(el("monto").value);
-  const cat = el("cat").value;
+  let cat = el("cat").value;
   const fecha = el("fecha").value;
+
+  // Si eligió "Otros" y escribió un nombre, usamos esa categoría nueva.
+  if (cat === "Otros") {
+    const nueva = el("cat-nueva").value.trim();
+    if (nueva) cat = nueva;
+  }
 
   if (!fecha) { alert("Elige una fecha."); return; }
   if (isNaN(monto) || monto <= 0) { alert("Ingresa un monto válido."); return; }
@@ -350,6 +386,7 @@ async function registrar() {
 
   el("desc").value = "";
   el("monto").value = "";
+  el("cat-nueva").value = "";
   // Saltar al mes del movimiento recién cargado para que se vea
   mesActual = new Date(fecha + "T00:00:00");
   mesActual.setDate(1);
@@ -377,17 +414,21 @@ function mismoMes(fechaStr) {
 function render() {
   el("mes-label").textContent = mesActual.toLocaleDateString("es-AR", { month: "long", year: "numeric" });
 
+  poblarCategorias();
+
   const delMes = movimientos.filter(m => mismoMes(m.fecha));
 
   let ingresos = 0, egresos = 0;
-  const catTotals = {};
+  const egrTotals = {}, ingTotals = {};
   delMes.forEach(m => {
     const monto = parseFloat(m.monto) || 0;
+    const cat = m.categoria || "Otros";
     if (m.tipo === "Ingreso") {
       ingresos += monto;
+      ingTotals[cat] = (ingTotals[cat] || 0) + monto;
     } else {
       egresos += monto;
-      catTotals[m.categoria || "Otros"] = (catTotals[m.categoria || "Otros"] || 0) + monto;
+      egrTotals[cat] = (egrTotals[cat] || 0) + monto;
     }
   });
 
@@ -395,14 +436,17 @@ function render() {
   el("res-egresos").textContent = fmt(egresos);
   el("res-balance").textContent = fmt(ingresos - egresos);
 
+  // Gráfico (egresos o ingresos según el botón elegido)
+  el("grafico").innerHTML = dibujarDonut(tipoGrafico === "Ingreso" ? ingTotals : egrTotals);
+
   // Categorías
   const cajaCat = el("resumen-cat");
-  const cats = Object.keys(catTotals).sort((a,b) => catTotals[b] - catTotals[a]);
+  const cats = Object.keys(egrTotals).sort((a,b) => egrTotals[b] - egrTotals[a]);
   if (cats.length === 0) {
     cajaCat.innerHTML = "<span class='muted'>Sin gastos este mes.</span>";
   } else {
     cajaCat.innerHTML = "<b>Gastos por categoría</b>" +
-      cats.map(c => `<div class="fila"><span>${escapeHtml(c)}</span><span>${fmt(catTotals[c])}</span></div>`).join("");
+      cats.map(c => `<div class="fila"><span>${escapeHtml(c)}</span><span>${fmt(egrTotals[c])}</span></div>`).join("");
   }
 
   // Historial
@@ -421,6 +465,137 @@ function render() {
         <td><button class="danger" onclick="eliminar('${m.id}')" aria-label="Eliminar">🗑</button></td>
       </tr>`;
     }).join("");
+  }
+}
+
+// -------------------- Categorías dinámicas --------------------
+// Llena el desplegable con las categorías por defecto + las que el usuario ya usó.
+function poblarCategorias() {
+  const usadas = movimientos.map(m => m.categoria).filter(Boolean);
+  const todas = [...new Set([...CATS_DEFAULT, ...usadas])]
+    .filter(c => c !== "Otros")
+    .sort((a, b) => a.localeCompare(b, "es"));
+  const sel = el("cat");
+  const previo = sel.value;
+  sel.innerHTML = todas.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("")
+    + `<option value="Otros">Otros (agregar nueva…)</option>`;
+  if ([...sel.options].some(o => o.value === previo)) sel.value = previo;
+  toggleNuevaCat();
+}
+
+// Muestra/oculta el casillero para escribir una categoría nueva.
+function toggleNuevaCat() {
+  el("cat-nueva").classList.toggle("hidden", el("cat").value !== "Otros");
+}
+
+// -------------------- Gráfico (dona) --------------------
+function cambiarGrafico(tipo) {
+  tipoGrafico = tipo;
+  el("gt-egreso").classList.toggle("active", tipo === "Egreso");
+  el("gt-ingreso").classList.toggle("active", tipo === "Ingreso");
+  render();
+}
+
+// Dibuja una dona en SVG a partir de { categoría: total }.
+function dibujarDonut(totals) {
+  const labels = Object.keys(totals).sort((a, b) => totals[b] - totals[a]);
+  const total = labels.reduce((s, k) => s + totals[k], 0);
+  const queE = tipoGrafico === "Ingreso" ? "ingresos" : "egresos";
+  if (total <= 0) {
+    return `<p class="muted" style="text-align:center;margin:8px 0;">Sin ${queE} este mes.</p>`;
+  }
+
+  const cx = 80, cy = 80, r = 58, sw = 26, C = 2 * Math.PI * r;
+  let acum = 0;
+  const arcos = labels.map((k, i) => {
+    const f = totals[k] / total;
+    const dash = `${(f * C).toFixed(2)} ${C.toFixed(2)}`;
+    const off = (-acum * C).toFixed(2);
+    acum += f;
+    const color = PALETA[i % PALETA.length];
+    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-dasharray="${dash}" stroke-dashoffset="${off}" transform="rotate(-90 ${cx} ${cy})"></circle>`;
+  }).join("");
+
+  const svg = `<svg viewBox="0 0 160 160" width="150" height="150" role="img" aria-label="Gráfico de ${queE} por categoría">
+    ${arcos}
+    <text x="${cx}" y="${cy - 4}" text-anchor="middle" font-size="11" fill="#888">Total</text>
+    <text x="${cx}" y="${cy + 13}" text-anchor="middle" font-size="14" font-weight="700" fill="#2c3e50">${fmt(total)}</text>
+  </svg>`;
+
+  const top = labels[0];
+  const etiqueta = tipoGrafico === "Ingreso" ? "Mayor ingreso" : "Mayor egreso";
+  const destacado = `<div class="leg-top">${etiqueta}: <b>${escapeHtml(top)}</b> (${fmt(totals[top])})</div>`;
+  const leyenda = labels.map((k, i) => {
+    const f = totals[k] / total;
+    const color = PALETA[i % PALETA.length];
+    return `<div class="leg-fila">
+      <span class="leg-dot" style="background:${color}"></span>
+      <span class="leg-nom">${escapeHtml(k)}</span>
+      <span class="leg-val">${fmt(totals[k])} · ${(f * 100).toFixed(0)}%</span>
+    </div>`;
+  }).join("");
+
+  return `<div class="donut-wrap">${svg}<div class="leyenda">${destacado}${leyenda}</div></div>`;
+}
+
+// -------------------- Exportar a Excel --------------------
+// Carga la librería de Excel (SheetJS) solo cuando hace falta.
+function cargarSheetJS() {
+  return new Promise((resolve, reject) => {
+    if (window.XLSX) return resolve(window.XLSX);
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
+    s.onload = () => resolve(window.XLSX);
+    s.onerror = () => reject(new Error("No se pudo cargar la librería de Excel. Revisa tu conexión a internet."));
+    document.head.appendChild(s);
+  });
+}
+
+async function exportarExcel(btn) {
+  const delMes = movimientos
+    .filter(m => mismoMes(m.fecha))
+    .slice()
+    .sort((a, b) => a.fecha.localeCompare(b.fecha));
+  if (delMes.length === 0) { alert("No hay movimientos este mes para exportar."); return; }
+
+  if (btn) { btn.disabled = true; btn.textContent = "Preparando…"; }
+
+  try {
+    const XLSX = await cargarSheetJS();
+
+    let ingresos = 0, egresos = 0;
+    const filas = delMes.map(m => {
+      const monto = parseFloat(m.monto) || 0;
+      if (m.tipo === "Ingreso") ingresos += monto; else egresos += monto;
+      return {
+        Fecha: m.fecha,
+        Tipo: m.tipo,
+        Descripción: m.descripcion || "",
+        Categoría: m.categoria || "Otros",
+        Monto: monto
+      };
+    });
+
+    const aoa = [
+      ["Fecha", "Tipo", "Descripción", "Categoría", "Monto"],
+      ...filas.map(f => [f.Fecha, f.Tipo, f.Descripción, f.Categoría, f.Monto]),
+      [],
+      ["", "", "", "Ingresos", ingresos],
+      ["", "", "", "Egresos", egresos],
+      ["", "", "", "Balance", ingresos - egresos]
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [{ wch: 12 }, { wch: 10 }, { wch: 30 }, { wch: 16 }, { wch: 12 }];
+
+    const wb = XLSX.utils.book_new();
+    const nombreMes = mesActual.toLocaleDateString("es-AR", { month: "long", year: "numeric" });
+    XLSX.utils.book_append_sheet(wb, ws, nombreMes.slice(0, 31));
+    XLSX.writeFile(wb, `Billetera ${nombreMes}.xlsx`);
+  } catch (e) {
+    alert(e.message || "No se pudo exportar.");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "⬇️ Exportar mes a Excel"; }
   }
 }
 
